@@ -2,7 +2,7 @@
 .global _main
 .align 4
 
-cnt_str:
+cnt_str: ; count bytes until quote character (0x22)
     mov x8, x0
 cnt_str_loop:
     ldrb w9, [x8], #1
@@ -11,15 +11,15 @@ cnt_str_loop:
     sub x0, x8, x0
     ret
 
-cnt_strnull:
+cnt_strnull: ; count bytes until null terminator
     mov x8, x0
 cnt_strnull_loop:
     ldrb w9, [x8], #1
-    cbnz w9, cnt_str_loop
+    cbz w9, cnt_str_loop
     sub x0, x8, x0
     ret
 
-prep_str:
+prep_str: ; replace quote with null terminator (prepare string for C functions)
     mov x8, x0
 prep_str_loop:
     ldrb w9, [x8], #1
@@ -29,7 +29,7 @@ prep_str_loop:
     strb w9, [x8, #-1]
     ret
 
-fix_str:
+fix_str: ; replace null terminator with quote (restore string format)
     mov x8, x0
 fix_str_loop:
     ldrb w9, [x8], #1
@@ -40,14 +40,14 @@ fix_str_fin:
     strb w9, [x8, #-1]
     ret
 
-do_input_byte:
+do_input_byte: ; read single byte from stdin via getchar
     stp fp, lr, [sp, #-16]!
     bl _getchar 
     str x0, [x20], #8
     ldp fp, lr, [sp], #16
     ret
 
-do_input_quad:
+do_input_quad: ; read 8 bytes from stdin via read syscall
     stp fp, lr, [sp, #-16]!
     mov x0, #0
     mov x1, x20
@@ -57,7 +57,7 @@ do_input_quad:
     ldp fp, lr, [sp], #16
     ret
 
-do_pop_print:
+do_pop_print: ; pop value from stack and print using printf
     ldr x1, [x20, #-8]!
     stp fp, lr, [sp, #-16]!
     str x1, [sp, #-16]!
@@ -68,7 +68,7 @@ do_pop_print:
     ldp fp, lr, [sp], #16
     ret
 
-_main:
+_main: ; program entry point
     stp fp, lr, [sp, #-16]!
     stp x0, x1, [sp, #-16]!
     mov x28, sp
@@ -81,7 +81,7 @@ _main:
     cbnz w0, arg_ok
     mov x0, #0
     b err
-arg_ok:
+arg_ok: ; arguments validated
     ldr x19, [x1, #8]
     mov x20, sp ; reserve 4096 for stack
     add x26, x20, #2048 
@@ -93,7 +93,7 @@ arg_ok:
     add x25, x21, #1792; reserve 256 or 32 values for local vars (8 bytes each)
     ; x27 reserved for values surviving function calls
 
-pick:
+pick: ; main interpreter loop - pick next token
     ldrb w0, [x19], #1
     cbz w0, end
     cmp w0, #0x22
@@ -115,7 +115,7 @@ pick:
     cmp w0, #0x30 ; 0
     b.lt wrd
     b num
-str:
+str: ; parse string literal
     mov x1, x19
 str_loop:
     ldrb w0, [x19], #1
@@ -124,10 +124,10 @@ str_loop:
     b.ne str_loop
     str x1, [x20], #8
     b pick
-str_err:
+str_err: ; string not properly terminated
     mov w0, #1
     b err
-def_skip_space:
+def_skip_space: ; skip whitespace before definition name
     ldrb w0, [x19], #1
     cmp w0, #0x09
     b.eq def_skip_space
@@ -135,7 +135,7 @@ def_skip_space:
     b.eq def_skip_space
     cmp w0, #0x20
     b.eq def_skip_space
-def:
+def: ; define new word
     ; x1 = string ref, x2 = id_len, x3 = total_len
     mov x24, #1
     bl wrd
@@ -147,16 +147,16 @@ def_loop:
     cmp w0, #0x3b
     b.eq def_end
     b def_loop
-def_end:
+def_end: ; finalize definition storage
     bfi x2, x3, #16, #48
     add x3, x21, x22, LSL#4
     stp x1, x2, [x3]
     add x22, x22, #1
     b pick
-def_err:
+def_err: ; definition not properly terminated
     mov w0, #2
     b err
-wrd:
+wrd: ; parse word token
     ; x1 = string ref, x2 = len
     mov x1, x19
     mov w2, #1
@@ -176,11 +176,11 @@ wrd_loop:
     b.eq wrd_fin
     add w2, w2, #1
     b wrd_loop
-wrd_fin:
+wrd_fin: ; word parsing complete
     tbz x24, #0, wrd_find
     mov x24, #0
     ret
-wrd_find:
+wrd_find: ; lookup word in definitions
     ; x0 = defs num
     sub x19, x19, #1
     mov x0, x22
@@ -193,7 +193,7 @@ wrd_find_loop:
     cmp w2, w7
     b.eq wrd_find_cmp
     b wrd_find_loop
-wrd_find_cmp:
+wrd_find_cmp: ; compare word strings
     mov w8, #0
 wrd_find_cmp_loop:
     ldrb w10, [x1, x8]
@@ -204,15 +204,15 @@ wrd_find_cmp_loop:
     cmp w8, w2
     b.eq wrd_find_fin
     b wrd_find_cmp_loop
-wrd_find_cmp_ret:
+wrd_find_cmp_ret: ; comparison failed, continue search
     b wrd_find_loop
-wrd_find_fin:
+wrd_find_fin: ; word found in definitions - execute
     mov x24, #2
     add x5, x5, x7
     str x19, [x26], #8
     mov x19, x5
     b pick 
-wrd_find_fin_fail:
+wrd_find_fin_fail: ; word not found - check built-in operations
     cmp w2, #1
     b.eq wrd_find.1
     cmp w2, #2
@@ -222,7 +222,7 @@ wrd_find_fin_fail:
     cmp w2, #4
     b.eq wrd_find.4
     b wrd_find_err
-wrd_find.1:
+wrd_find.1: ; single-character built-in operations
     ldrb w0, [x1]
     cmp w0, #0x21 ; !
     b.eq put
@@ -249,7 +249,7 @@ wrd_find.1:
     cmp w0, #0x40 ; @
     b.eq get
     b wrd_find_err
-wrd_find.2:
+wrd_find.2: ; two-character built-in operations
     ldrh w0, [x1]
     mov w2, #0x2162
     cmp w0, w2 ; b!
@@ -288,7 +288,7 @@ wrd_find.2:
     cmp w0, w2 ; $f
     b.eq close
     b wrd_find_err
-wrd_find.3:
+wrd_find.3: ; three-character built-in operations
     ldrh w0, [x1]
     mov w2, #0x2c64
     cmp w0, w2 ; s,
@@ -303,7 +303,7 @@ wrd_find.3:
     cmp w0, w2 ; ru
     b.eq run
     b wrd_find_err
-wrd_find.4:
+wrd_find.4: ; four-character built-in operations
     ldrsw x0, [x1]
     mov w2, #0x7773 ; ws
     movk w2, #0x7061, LSL#16 ; pa
@@ -318,19 +318,19 @@ wrd_find.4:
     cmp x0, x2 ; exit
     b.eq exit_wrd
     b wrd_find_err
-wrd_find_err:
+wrd_find_err: ; word not found error
     mov w0, #3
     b err
-comm:
+comm: ; skip comment until closing paren
     ldrb w0, [x19], #1
     cbz w0, comm_err
     cmp w0, #0x29 ; )
     b.eq pick
     b comm
-comm_err:
+comm_err: ; comment not properly closed
     mov w0, #4
     b err
-num:
+num: ; parse numeric literal
     sub x0, x0, #0x30 ; 0
     mov x1, x0
 num_loop:
@@ -342,83 +342,83 @@ num_loop:
     sub x0, x0, #0x30 ; 0
     madd x1, x1, x23, x0
     b num_loop
-num_fin:
+num_fin: ; push number onto stack
     sub x19, x19, #1
     str x1, [x20], #8
     b pick
-if:
+if: ; conditional operation - if x > 0 then y else z
     ldp x0, x1, [x20, #-16]!
     ldr x2, [x20, #-8]!
     cmp x2, #0
     csel x0, x0, x1, gt
     str x0, [x20], #8
     b pick
-dup:
+dup: ; duplicate top of stack
     ldrb w0, [x1, #2]
     cmp w0, #0x70 ; p
     b.ne wrd_find_err
     ldr x0, [x20, #-8]
     str x0, [x20], #8
     b pick
-swap:
+swap: ; swap top two stack values
     ldp x0, x1, [x20, #-16]
     stp x1, x0, [x20, #-16]
     b pick
-loc:
+loc: ; calculate local variable address
     ldr x0, [x20, #-8]
     add x0, x25, x0, LSL#3
     str x0, [x20, #-8]
     b pick
-put:
+put: ; store quad at address (!)
     ldp x0, x1, [x20, #-16]!
     str x0, [x1]
     b pick
-put_b:
+put_b: ; store byte at address (b!)
     ldp x0, x1, [x20, #-16]!
     strb w0, [x1]
     b pick
-add:
+add: ; addition operation (+)
     ldp x0, x1, [x20, #-16]!
     add x0, x0, x1
     str x0, [x20], #8
     b pick
-sub:
+sub: ; subtraction operation (-)
     ldp x0, x1, [x20, #-16]!
     sub x0, x0, x1
     str x0, [x20], #8
     b pick
-mul:
+mul: ; multiplication operation (*)
     ldp x0, x1, [x20, #-16]!
     mul x0, x0, x1
     str x0, [x20], #8
     b pick
-div:
+div: ; division operation (/)
     ldp x0, x1, [x20, #-16]!
     sdiv x0, x0, x1
     str x0, [x20], #8
     b pick
-get:
+get: ; load quad from address (@)
     ldr x0, [x20, #-8]
     ldr x0, [x0]
     str x0, [x20, #-8]
     b pick
-get_b:
+get_b: ; load byte from address (b@)
     ldr x0, [x20, #-8]
     ldrb w0, [x0]
     str x0, [x20, #-8]
     b pick
-input:
+input: ; read 8 bytes from stdin (,)
     bl do_input_quad
     b pick
-input_b:
+input_b: ; read 1 byte from stdin
     bl do_input_byte
     b pick
-print:
+print: ; print number (.)
     adrp x0, pnum@PAGE
     add x0, x0, pnum@PAGEOFF
     bl do_pop_print
     b pick
-print_s:
+print_s: ; print string (s.)
     ldr x0, [x20, #-8]
     mov x27, x0
     bl prep_str
@@ -428,21 +428,21 @@ print_s:
     mov x0, x27
     bl fix_str
     b pick
-print_x:
+print_x: ; print hex address (x.)
     adrp x0, pxnum@PAGE
     add x0, x0, pxnum@PAGEOFF
     bl do_pop_print
     b pick
-res:
+res: ; allocate memory (#)
     ldr x0, [x20, #-8]
     bl _malloc
     str x0, [x20, #-8]
     b pick
-del:
+del: ; free memory ($)
     ldr x0, [x20, #-8]!
     bl _free
     b pick
-open:
+open: ; open file (#f)
     ldp x1, x0, [x20, #-16]!
     ldr x2, [x20, #-8]
     mov x27, x0
@@ -452,25 +452,25 @@ open:
     mov x0, x27
     bl fix_str
     b pick
-close:
+close: ; close file ($f)
     ldr x0, [x20, #-8]!
     bl _close
     b pick
-arg_count:
+arg_count: ; get argument count (&&)
     ldr x0, [x28]
     str x0, [x20], #8
     b pick
-get_arg: ; getting itself at 1 & will cause the program to break
+get_arg: ; get command line argument (&)
     ldr x1, [x28, #8]
     cbz x1, get_arg_z
     ldr x0, [x20, #-8]
     ldr x0, [x1, x0, LSL#3]
     str x0, [x20, #-8]
     b pick
-get_arg_z:
+get_arg_z: ; null argument case
     str x1, [x20, #-8]
     b pick
-run:
+run: ; execute string as code (run)
     ldrb w0, [x1, #2]
     cmp w0, #0x6e ; n
     b.ne wrd_find_err
@@ -481,21 +481,21 @@ run:
     cbz w2, pick
     add x19, x19, #1
     b wrd_find
-to_cs:
+to_cs: ; convert to C string format (cs)
     ldr x0, [x20, #-8]
     bl fix_str
     b pick
-from_cs:
+from_cs: ; convert from C string format (sc)
     ldr x0, [x20, #-8]
     bl prep_str
     b pick
-writef:
+writef: ; write to file (.f)
     ldp x1, x0, [x20, #-16]!
     ldr x2, [x20, #-8]!
     bl _write 
     ; returns bytes written
     b pick
-writef_cs:
+writef_cs: ; write C string to file (cs.f)
     ldp x1, x3, [x20, #-16]!
     mov x0, x1
     bl cnt_strnull
@@ -504,7 +504,7 @@ writef_cs:
     bl _write 
     ; returns bytes written
     b pick
-writef_s:
+writef_s: ; write string to file (s.f)
     ldrb w0, [x1, #2]
     cmp w0, #0x66 ; f
     b.ne pick
@@ -518,13 +518,13 @@ writef_s:
     mov x0, x1
     bl fix_str
     b pick
-readf:
+readf: ; read from file (,f)
     ldp x1, x0, [x20, #-16]!
     ldr x2, [x20, #-8]!
     bl _read 
     ; returns bytes read
     b pick
-readf_s:
+readf_s: ; read string from file (s,f)
     ldrb w0, [x1, #2]
     cmp w0, #0x66 ; f
     b.ne pick
@@ -539,23 +539,23 @@ readf_s:
     mov x0, x1
     bl fix_str
     b pick
-exit_wrd:
+exit_wrd: ; exit with code from stack (exit)
     ldr x0, [x20, #-8]
     b exit
-end_exec:
+end_exec: ; return from word definition (;)
     ldr x19, [x26, #-8]!
     b pick
 
-end:
+end: ; normal program termination
     mov w0, #0
     b exit
-err:
+err: ; error handler - print message and exit
     adrp x1, err_str@PAGE
     add x1, x1, err_str@PAGEOFF
     ldr x0, [x1, x0, LSL#3]
     bl _puts
     mov w0, #1
-exit:
+exit: ; exit program with status code
     add sp, sp, #2048
     add sp, sp, #2048
     add sp, sp, #2048
